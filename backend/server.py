@@ -1257,30 +1257,65 @@ async def stream_media(
                     return original_mime or "application/octet-stream"
             
             # Get optimized MIME type
-            compatible_mime = get_optimized_mime_type(file_name, mime_type, is_mobile_chrome)
+            compatible_mime = get_optimized_mime_type(file_name, mime_type, is_mobile_chrome, is_mobile)
             
             # File format specific optimizations
             is_mkv = file_name.endswith('.mkv')
+            is_mp4 = file_name.endswith('.mp4')
             is_video = any(file_name.endswith(ext) for ext in ['.mp4', '.mkv', '.webm', '.avi', '.mov', '.m4v', '.wmv'])
             is_audio = any(file_name.endswith(ext) for ext in ['.mp3', '.wav', '.flac', '.m4a', '.ogg', '.aac'])
             
-            # Adaptive chunk sizing for performance
-            base_chunk_size = 65536  # 64KB base
-            
-            if is_mkv:
-                # Smaller chunks for MKV files to improve compatibility
-                if is_mobile_chrome:
-                    chunk_size = 32768  # 32KB for mobile Chrome MKV
+            # Ultra-adaptive chunk sizing for maximum performance
+            if chunk_size is None:
+                if low_bandwidth == "true":
+                    # Low bandwidth optimization
+                    if is_mkv:
+                        chunk_size = 16384  # 16KB for MKV on slow connections
+                    else:
+                        chunk_size = 32768  # 32KB for other formats
+                elif is_mkv:
+                    # MKV-specific optimizations
+                    if mobile_mkv == "true" or is_mobile_chrome:
+                        chunk_size = 32768  # 32KB for mobile MKV
+                    else:
+                        chunk_size = 65536  # 64KB for desktop MKV
+                elif is_mp4:
+                    # MP4 optimizations for 1080p content
+                    if file_size > 2 * 1024 * 1024 * 1024:  # > 2GB (likely 1080p+)
+                        chunk_size = 2 * 1024 * 1024  # 2MB for large 1080p files
+                    elif file_size > 1 * 1024 * 1024 * 1024:  # > 1GB
+                        chunk_size = 1 * 1024 * 1024  # 1MB for medium 1080p files
+                    else:
+                        chunk_size = 512 * 1024  # 512KB for smaller files
+                elif file_size > 500 * 1024 * 1024:  # > 500MB
+                    chunk_size = 1 * 1024 * 1024  # 1MB for large files
+                elif file_size > 100 * 1024 * 1024:  # > 100MB
+                    chunk_size = 512 * 1024   # 512KB for medium files
                 else:
-                    chunk_size = 65536  # 64KB for desktop MKV
-            elif file_size > 500 * 1024 * 1024:  # > 500MB
-                chunk_size = 1024 * 1024  # 1MB for large files
-            elif file_size > 100 * 1024 * 1024:  # > 100MB
-                chunk_size = 512 * 1024   # 512KB for medium files
-            else:
-                chunk_size = base_chunk_size  # 64KB for small files
+                    chunk_size = 65536  # 64KB for small files
             
-            logger.info(f"Streaming file: {file_name} | MIME: {compatible_mime} | Size: {file_size} | Chunk: {chunk_size} | Mobile Chrome: {is_mobile_chrome}")
+            # Quality-based optimizations
+            quality_multiplier = 1.0
+            if quality:
+                if quality == "1080p":
+                    quality_multiplier = 1.5  # Larger chunks for 1080p
+                elif quality == "720p":
+                    quality_multiplier = 1.2  # Slightly larger chunks for 720p
+                elif quality == "480p" or quality == "360p":
+                    quality_multiplier = 0.8  # Smaller chunks for lower quality
+            
+            chunk_size = int(chunk_size * quality_multiplier)
+            
+            logger.info(f"Ultra-optimized streaming: {file_name} | MIME: {compatible_mime} | Size: {file_size} | Chunk: {chunk_size} | Quality: {quality} | Mobile: {is_mobile} | Low BW: {low_bandwidth}")
+            
+            # Enhanced timeout configuration based on file type and size
+            base_timeout = 30.0
+            if low_bandwidth == "true":
+                base_timeout = 90.0  # Longer timeouts for slow connections
+            elif is_mkv:
+                base_timeout = 60.0  # Longer timeouts for MKV
+            elif file_size > 1 * 1024 * 1024 * 1024:  # > 1GB
+                base_timeout = 120.0  # Very long timeouts for large files
             
             # Handle range requests for seeking
             range_header = request.headers.get("Range")
