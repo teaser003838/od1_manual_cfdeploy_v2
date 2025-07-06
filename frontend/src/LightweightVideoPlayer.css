@@ -364,12 +364,36 @@
 }
 
 .format-tag {
-  background-color: #e50914;
   color: white;
   padding: 2px 6px;
   border-radius: 3px;
   font-size: 10px;
   font-weight: bold;
+}
+
+.format-tag.excellent {
+  background-color: #28a745;
+}
+
+.format-tag.good {
+  background-color: #17a2b8;
+}
+
+.format-tag.fair {
+  background-color: #ffc107;
+  color: black;
+}
+
+.format-tag.limited {
+  background-color: #fd7e14;
+}
+
+.format-tag.poor {
+  background-color: #dc3545;
+}
+
+.format-tag.unknown {
+  background-color: #6c757d;
 }
 
 .mobile-warning {
@@ -379,6 +403,16 @@
   border-radius: 3px;
   font-size: 10px;
   font-weight: bold;
+}
+
+.compatibility-warning {
+  background-color: #dc3545;
+  color: white;
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-size: 10px;
+  font-weight: bold;
+  cursor: help;
 }
 
 /* Mobile Optimizations */
