@@ -52,13 +52,29 @@ const NetflixVideoPlayer = ({ video, backendUrl, accessToken, onBack, onNextVide
   // Mobile detection
   const [isMobile, setIsMobile] = useState(false);
   
-  // Control visibility timer
+  // Timers
   const hideControlsTimer = useRef(null);
   const autoplayTimer = useRef(null);
   
-  // Quality options
+  // Quality and playback options
   const qualityOptions = ['Auto', '1080p', '720p', '480p', '360p'];
   const playbackRates = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2];
+  
+  // Device and format detection
+  const deviceInfo = VideoFormatUtils.getDeviceInfo();
+  const formatInfo = VideoFormatUtils.detectFormat(video.name);
+  const compatibilityInfo = VideoFormatUtils.getCompatibilityWarning(video.name);
+  const streamingParams = VideoFormatUtils.getStreamingParams(video.name, video.size);
+  
+  // Device-specific flags
+  const isMobile = deviceInfo.isMobile;
+  const isMobileChrome = deviceInfo.isMobileChrome;
+  const hasCompatibilityIssues = compatibilityInfo.warnings.length > 0;
+  
+  // Log format information for debugging
+  useEffect(() => {
+    VideoFormatUtils.logFormatInfo(video.name, video.size);
+  }, [video.name, video.size]);
 
   // Initialize player
   useEffect(() => {
