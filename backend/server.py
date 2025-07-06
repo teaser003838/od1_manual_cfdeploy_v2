@@ -1317,7 +1317,7 @@ async def stream_media(
             elif file_size > 1 * 1024 * 1024 * 1024:  # > 1GB
                 base_timeout = 120.0  # Very long timeouts for large files
             
-            # Handle range requests for seeking
+            # Handle range requests for seeking with enhanced performance
             range_header = request.headers.get("Range")
             if range_header:
                 try:
@@ -1330,22 +1330,33 @@ async def stream_media(
                     start = max(0, min(start, file_size - 1))
                     end = max(start, min(end, file_size - 1))
                     
-                    # For MKV on mobile Chrome, limit range size for better compatibility
-                    if is_mkv and is_mobile_chrome:
-                        max_range = 5 * 1024 * 1024  # 5MB max for MKV on mobile Chrome
+                    # Smart range optimization for different formats
+                    if is_mkv and (mobile_mkv == "true" or is_mobile_chrome):
+                        # Smaller ranges for MKV on mobile for better compatibility
+                        max_range = 3 * 1024 * 1024  # 3MB max for MKV on mobile
+                        if (end - start + 1) > max_range:
+                            end = start + max_range - 1
+                    elif is_mp4 and file_size > 1 * 1024 * 1024 * 1024:  # Large MP4 files (1080p)
+                        # Larger ranges for MP4 1080p content for better performance
+                        max_range = 20 * 1024 * 1024  # 20MB max for large MP4
+                        if (end - start + 1) > max_range:
+                            end = start + max_range - 1
+                    elif low_bandwidth == "true":
+                        # Smaller ranges for low bandwidth
+                        max_range = 2 * 1024 * 1024  # 2MB max for slow connections
                         if (end - start + 1) > max_range:
                             end = start + max_range - 1
                     
-                    logger.info(f"Range request: bytes={start}-{end}/{file_size}")
+                    logger.info(f"Enhanced range request: bytes={start}-{end}/{file_size} | Format: {file_name.split('.')[-1].upper()}")
                     
-                    # Optimized range streaming
+                    # Ultra-optimized range streaming
                     async def generate_range():
                         try:
                             timeout_config = httpx.Timeout(
-                                connect=10.0,
-                                read=120.0 if is_mkv else 60.0,
-                                write=30.0,
-                                pool=30.0
+                                connect=15.0,
+                                read=base_timeout * 2,  # Double read timeout for range requests
+                                write=60.0,
+                                pool=60.0
                             )
                             
                             async with httpx.AsyncClient(timeout=timeout_config) as stream_client:
@@ -1355,22 +1366,28 @@ async def stream_media(
                                         logger.error(f"Range request failed: {media_response.status_code}")
                                         return
                                     
-                                    # Stream with adaptive chunk size
+                                    # Stream with adaptive chunk size and performance monitoring
                                     bytes_streamed = 0
+                                    last_log_time = 0
+                                    start_time = asyncio.get_event_loop().time()
+                                    
                                     async for chunk in media_response.aiter_bytes(chunk_size=chunk_size):
                                         yield chunk
                                         bytes_streamed += len(chunk)
                                         
-                                        # Progress logging for large requests
-                                        if bytes_streamed % (chunk_size * 100) == 0:
+                                        # Performance logging (throttled)
+                                        current_time = asyncio.get_event_loop().time()
+                                        if current_time - last_log_time > 5.0:  # Log every 5 seconds
                                             progress = (bytes_streamed / (end - start + 1)) * 100
-                                            logger.debug(f"Range streaming progress: {progress:.1f}%")
+                                            speed = bytes_streamed / (current_time - start_time + 0.1)  # Avoid division by zero
+                                            logger.debug(f"Range streaming: {progress:.1f}% | Speed: {speed/1024:.1f} KB/s")
+                                            last_log_time = current_time
                                             
                         except Exception as e:
-                            logger.error(f"Error in range streaming: {str(e)}")
+                            logger.error(f"Error in enhanced range streaming: {str(e)}")
                             return
                     
-                    # Enhanced headers for range response
+                    # Enhanced headers for range response with performance optimizations
                     range_headers = {
                         "Accept-Ranges": "bytes",
                         "Content-Range": f"bytes {start}-{end}/{file_size}",
@@ -1378,23 +1395,37 @@ async def stream_media(
                         "Access-Control-Allow-Origin": "*",
                         "Access-Control-Allow-Headers": "Range, Content-Type, Authorization",
                         "Access-Control-Expose-Headers": "Content-Range, Content-Length, Accept-Ranges",
-                        "Cache-Control": "public, max-age=3600",
+                        "Cache-Control": "public, max-age=3600, stale-while-revalidate=86400",
                     }
                     
-                    # MKV-specific headers for mobile Chrome
+                    # Format-specific optimizations
                     if is_mkv:
                         range_headers.update({
                             "X-Content-Type-Options": "nosniff",
                             "Content-Disposition": "inline",
                         })
                         
-                        if is_mobile_chrome:
-                            # Additional headers to help mobile Chrome with MKV
+                        if mobile_mkv == "true" or is_mobile_chrome:
+                            # Mobile Chrome specific headers for MKV
                             range_headers.update({
                                 "Connection": "keep-alive",
-                                "Transfer-Encoding": "identity",
-                                "Vary": "Accept-Encoding",
+                                "Keep-Alive": "timeout=30, max=100",
+                                "Vary": "Accept-Encoding, User-Agent",
                             })
+                    elif is_mp4:
+                        # MP4 performance optimizations
+                        range_headers.update({
+                            "X-Content-Duration": str(buffer_size),  # Hint for buffer size
+                            "X-Content-Type-Options": "nosniff",
+                        })
+                    
+                    # Low bandwidth optimizations
+                    if low_bandwidth == "true":
+                        range_headers.update({
+                            "Cache-Control": "public, max-age=7200, stale-while-revalidate=172800",  # Longer cache for slow connections
+                            "Connection": "keep-alive",
+                            "Keep-Alive": "timeout=60, max=50",
+                        })
                     
                     return StreamingResponse(
                         generate_range(),
