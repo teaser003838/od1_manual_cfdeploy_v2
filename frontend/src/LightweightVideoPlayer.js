@@ -83,16 +83,9 @@ const LightweightVideoPlayer = ({ video, backendUrl, accessToken, onBack, onNext
       setIsLoading(false);
       setIsBuffering(false);
       
-      // Enhanced error handling for MKV files
-      if (isMKV) {
-        if (isMobileChrome) {
-          setError('MKV files may not be fully supported on mobile Chrome. Try using a different browser or convert to MP4.');
-        } else {
-          setError('MKV playback error. Your browser may not support this format.');
-        }
-      } else {
-        setError('Video playback error. Please try again or check your connection.');
-      }
+      // Enhanced error handling with format-specific messages
+      const errorMessage = VideoFormatUtils.createErrorMessage(video.name, e.target?.error?.message);
+      setError(errorMessage);
     };
 
     const handleEnded = () => {
