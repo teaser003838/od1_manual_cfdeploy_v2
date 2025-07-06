@@ -1563,7 +1563,7 @@ async def stream_media(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Stream media error: {str(e)}")
+        logger.error(f"Ultra-optimized stream media error: {str(e)}")
         import traceback
         logger.error(f"Traceback: {traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=f"Failed to stream media: {str(e)}")
