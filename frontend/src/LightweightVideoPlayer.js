@@ -21,10 +21,21 @@ const LightweightVideoPlayer = ({ video, backendUrl, accessToken, onBack, onNext
   const progressBarRef = useRef(null);
   const hideControlsTimer = useRef(null);
 
-  // Device detection
-  const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
-  const isMobileChrome = /Chrome/.test(navigator.userAgent) && /Mobile/.test(navigator.userAgent);
-  const isMKV = video.name.toLowerCase().endsWith('.mkv');
+  // Device detection and format analysis
+  const deviceInfo = VideoFormatUtils.getDeviceInfo();
+  const formatInfo = VideoFormatUtils.detectFormat(video.name);
+  const compatibilityInfo = VideoFormatUtils.getCompatibilityWarning(video.name);
+  const streamingParams = VideoFormatUtils.getStreamingParams(video.name, video.size);
+  
+  const isMobile = deviceInfo.isMobile;
+  const isMobileChrome = deviceInfo.isMobileChrome;
+  const isMKV = formatInfo.format === 'mkv';
+  const hasCompatibilityIssues = compatibilityInfo.warnings.length > 0;
+
+  // Log format information for debugging
+  useEffect(() => {
+    VideoFormatUtils.logFormatInfo(video.name, video.size);
+  }, [video.name, video.size]);
 
   // Build optimized video URL
   const getVideoUrl = useCallback(() => {
