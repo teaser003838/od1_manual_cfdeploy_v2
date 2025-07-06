@@ -74,7 +74,6 @@ const NetflixVideoPlayer = ({ video, backendUrl, accessToken, onBack, onNextVide
   useEffect(() => {
     VideoFormatUtils.logFormatInfo(video.name, video.size);
   }, [video.name, video.size]);
-  }, [video.name, video.size]);
 
   // Initialize player
   useEffect(() => {
