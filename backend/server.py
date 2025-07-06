@@ -1206,35 +1206,38 @@ async def stream_media(
             is_safari_mobile = "safari" in user_agent and "mobile" in user_agent and "chrome" not in user_agent
             is_mobile = is_mobile_chrome or is_safari_mobile or "mobile" in user_agent
             
-            # Enhanced MIME type detection with mobile compatibility
-            def get_optimized_mime_type(filename, original_mime, is_mobile_chrome=False):
-                """Get browser-compatible MIME type with mobile optimizations"""
+            # Ultra-enhanced MIME type detection with performance optimization
+            def get_optimized_mime_type(filename, original_mime, is_mobile_chrome=False, is_mobile=False):
+                """Get browser-compatible MIME type with ultra performance optimizations"""
+                # Video formats with performance priority
                 if filename.endswith('.mp4'):
                     return "video/mp4"
                 elif filename.endswith('.webm'):
                     return "video/webm"
                 elif filename.endswith('.mkv'):
-                    # Special handling for MKV on mobile Chrome
-                    if is_mobile_chrome:
-                        # Try to fallback to MP4 MIME type for better mobile Chrome compatibility
-                        logger.info(f"Mobile Chrome detected for MKV file: {filename}")
-                        return "video/mp4"  # Fallback MIME type for mobile Chrome
+                    # Enhanced MKV handling for different platforms
+                    if mobile_mkv == "true" or is_mobile_chrome:
+                        logger.info(f"Mobile MKV optimization for: {filename}")
+                        # Use H.264 container hint for better mobile compatibility
+                        return "video/mp4"  # Mobile fallback for better performance
                     else:
                         return "video/x-matroska"
                 elif filename.endswith('.avi'):
-                    # AVI is generally not supported well on mobile
-                    if is_mobile_chrome or is_safari_mobile:
-                        return "video/mp4"  # Fallback for mobile
+                    if is_mobile:
+                        return "video/mp4"  # Mobile fallback
                     return "video/x-msvideo"
                 elif filename.endswith('.mov'):
                     return "video/quicktime"
                 elif filename.endswith('.wmv'):
-                    # WMV is not supported on mobile
-                    if is_mobile_chrome or is_safari_mobile:
-                        return "video/mp4"  # Fallback for mobile
+                    if is_mobile:
+                        return "video/mp4"  # Mobile fallback
                     return "video/x-ms-wmv"
                 elif filename.endswith('.m4v'):
                     return "video/mp4"
+                elif filename.endswith('.flv'):
+                    return "video/x-flv"
+                elif filename.endswith('.3gp'):
+                    return "video/3gpp"
                 # Audio formats
                 elif filename.endswith('.mp3'):
                     return "audio/mpeg"
@@ -1248,6 +1251,8 @@ async def stream_media(
                     return "audio/ogg"
                 elif filename.endswith('.aac'):
                     return "audio/aac"
+                elif filename.endswith('.opus'):
+                    return "audio/opus"
                 else:
                     return original_mime or "application/octet-stream"
             
