@@ -118,7 +118,7 @@ const LightweightVideoPlayer = ({ video, backendUrl, accessToken, onBack, onNext
       videoElement.removeEventListener('error', handleError);
       videoElement.removeEventListener('ended', handleEnded);
     };
-  }, [video.id, onNextVideo, playlist, isMKV, isMobileChrome]);
+  }, [video.id, onNextVideo, playlist, formatInfo.format, deviceInfo.isMobileChrome]);
 
   // Keyboard shortcuts - optimized
   useEffect(() => {
