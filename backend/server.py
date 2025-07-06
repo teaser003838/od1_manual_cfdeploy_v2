@@ -1142,9 +1142,32 @@ async def search_files(q: str, authorization: str = Header(...)):
         raise HTTPException(status_code=500, detail="Failed to search files")
 
 @app.get("/api/stream/{item_id}")
-async def stream_media(item_id: str, request: Request, authorization: str = Header(None), token: str = None, quality: str = None):
-    """Optimized streaming endpoint with enhanced MKV support and performance"""
+async def stream_media(
+    item_id: str, 
+    request: Request, 
+    authorization: str = Header(None), 
+    token: str = None, 
+    quality: str = None,
+    chunk_size: int = None,
+    buffer_size: int = 30,
+    mobile_mkv: str = None,
+    low_bandwidth: str = None,
+    test: str = None
+):
+    """Ultra-optimized streaming endpoint with enhanced performance for MP4/MKV and 1080p support"""
     try:
+        # Handle test requests for network speed detection
+        if test:
+            return Response(
+                content="OK",
+                status_code=200,
+                headers={
+                    "Content-Type": "text/plain",
+                    "Cache-Control": "no-cache",
+                    "Content-Length": "2"
+                }
+            )
+        
         # Get access token
         access_token = None
         if authorization:
@@ -1177,10 +1200,11 @@ async def stream_media(item_id: str, request: Request, authorization: str = Head
             file_name = file_info.get("name", "").lower()
             mime_type = file_info.get("file", {}).get("mimeType", "")
             
-            # Mobile Chrome user agent detection
+            # Enhanced device detection
             user_agent = request.headers.get("user-agent", "").lower()
             is_mobile_chrome = ("chrome" in user_agent or "crios" in user_agent) and ("mobile" in user_agent or "android" in user_agent)
             is_safari_mobile = "safari" in user_agent and "mobile" in user_agent and "chrome" not in user_agent
+            is_mobile = is_mobile_chrome or is_safari_mobile or "mobile" in user_agent
             
             # Enhanced MIME type detection with mobile compatibility
             def get_optimized_mime_type(filename, original_mime, is_mobile_chrome=False):
