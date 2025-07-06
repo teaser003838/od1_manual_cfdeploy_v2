@@ -306,7 +306,7 @@ function App() {
   // Netflix Video Player View
   if (currentView === 'video' && selectedItem) {
     return (
-      <LightweightVideoPlayer 
+      <NetflixVideoPlayer 
         video={selectedItem}
         backendUrl={BACKEND_URL}
         accessToken={accessToken}
