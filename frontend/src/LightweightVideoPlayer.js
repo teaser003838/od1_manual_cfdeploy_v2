@@ -471,8 +471,17 @@ const LightweightVideoPlayer = ({ video, backendUrl, accessToken, onBack, onNext
           <div className="info-title">{video.name}</div>
           <div className="info-details">
             <span>Size: {formatFileSize(video.size)}</span>
-            {isMKV && <span className="format-tag">MKV</span>}
-            {isMobileChrome && isMKV && <span className="mobile-warning">Mobile Chrome</span>}
+            <span className={`format-tag ${compatibilityInfo.compatibility}`}>
+              {formatInfo.format.toUpperCase()}
+            </span>
+            {deviceInfo.isMobileChrome && formatInfo.format === 'mkv' && (
+              <span className="mobile-warning">Mobile Chrome</span>
+            )}
+            {hasCompatibilityIssues && (
+              <span className="compatibility-warning" title={compatibilityInfo.warnings.join(', ')}>
+                ⚠️ Limited Support
+              </span>
+            )}
           </div>
         </div>
       )}
