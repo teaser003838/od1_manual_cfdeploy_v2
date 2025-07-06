@@ -331,17 +331,41 @@ backend:
           agent: "testing"
           comment: "Watch history GET endpoint (/api/watch-history) is implemented and correctly requires authentication. Returns 422 error without auth token which is expected."
 
-  - task: "Enhanced Pagination Section with Folder Statistics"
+  - task: "Lightweight Video Player Performance Optimization"
     implemented: true
     working: true
-    file: "/app/frontend/src/FileExplorer.js, /app/frontend/src/FileExplorer.css"
+    file: "/app/frontend/src/LightweightVideoPlayer.js, /app/frontend/src/LightweightVideoPlayer.css"
     stuck_count: 0
-    priority: "medium"
+    priority: "high"
     needs_retesting: true
     status_history:
         - working: true
           agent: "main"
-          comment: "COMPLETED: Enhanced pagination section restoration with comprehensive folder statistics display. Implementation: 1) ENHANCED PAGINATION COMPONENT - Created new enhancedPaginationInfo component using useMemo that combines pagination info with folder/file statistics in unified display, 2) UNIFIED FORMAT - Implemented requested format 'Page X of Y | N items, size' showing pagination + current total folders & files + current folder size in one coherent display, 3) BOTTOM PLACEMENT - Added enhanced pagination section at bottom of page while keeping top section pagination removed as requested, 4) RESPONSIVE STYLING - Added proper CSS styling (.enhanced-pagination-info) with mobile responsive design and hardware acceleration for smooth performance, 5) INTEGRATED DATA - Combined pagination data with folder contents data including item count and folder/total size for comprehensive information display at bottom section."
+          comment: "COMPLETED PHASE 2: Created lightweight, performance-optimized video player to replace heavy Netflix-style player. Features: 1) Minimal state management with only essential variables, 2) Optimized event handlers with proper cleanup, 3) Hardware acceleration with transform: translateZ(0) and will-change properties, 4) Efficient control visibility logic that only auto-hides in fullscreen, 5) Streamlined keyboard shortcuts and touch handling, 6) Reduced component complexity by removing advanced features like quality switching, subtitles, and picture-in-picture, 7) Mobile-optimized chunk sizes and timeouts. The new player focuses on core functionality with maximum performance."
+
+  - task: "Enhanced Format Detection and MKV Mobile Chrome Fix"
+    implemented: true
+    working: true
+    file: "/app/frontend/src/VideoFormatUtils.js, /app/backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+        - working: true
+          agent: "main"
+          comment: "COMPLETED PHASE 3: Implemented comprehensive format detection and fallback system with mobile browser-specific handling. Backend optimizations: 1) Enhanced MIME type detection with mobile Chrome fallbacks (MKV files use MP4 MIME on mobile Chrome), 2) Adaptive chunk sizing (32KB for MKV on mobile Chrome, 64KB-1MB based on file size), 3) Device-specific streaming optimizations with longer timeouts for MKV, 4) User agent detection for mobile Chrome vs desktop browsers. Frontend utilities: 5) VideoFormatUtils.js with comprehensive format analysis, browser compatibility detection, and streaming parameter optimization, 6) Dynamic error messages with format-specific recommendations, 7) Compatibility warnings and mobile-specific guidance, 8) Visual indicators for format compatibility (excellent/good/fair/limited/poor). This addresses the black screen issue on mobile Chrome for MKV files."
+
+  - task: "Backend Streaming Optimization for MKV Performance"
+    implemented: true
+    working: true
+    file: "/app/backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+        - working: true
+          agent: "main"
+          comment: "COMPLETED BACKEND OPTIMIZATIONS: Enhanced streaming endpoint with performance improvements: 1) User agent detection for mobile Chrome and Safari mobile, 2) Adaptive chunk sizing based on format and device (32KB for MKV on mobile Chrome, up to 1MB for large files), 3) Optimized timeout configurations with longer timeouts for MKV files, 4) Mobile-specific MIME type fallbacks (MKV uses video/mp4 MIME on mobile Chrome for better compatibility), 5) Enhanced error handling with detailed logging and progress tracking, 6) Improved range request handling with mobile Chrome specific optimizations for MKV files, 7) Connection management with keep-alive headers for mobile devices. These changes specifically target the MKV streaming performance and black screen issues on mobile Chrome."
 
   - task: "Scroll Performance Optimization"
     implemented: true
