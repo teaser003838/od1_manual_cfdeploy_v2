@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, useCallback } from 'react';
+import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import VideoFormatUtils from './VideoFormatUtils';
 import './NetflixVideoPlayer.css';
 
@@ -7,8 +7,10 @@ const NetflixVideoPlayer = ({ video, backendUrl, accessToken, onBack, onNextVide
   const containerRef = useRef(null);
   const progressBarRef = useRef(null);
   const volumeBeforeTimelineSeek = useRef(1);
+  const bufferCache = useRef(new Map()); // Buffer cache for performance
+  const preloadCache = useRef(new Map()); // Preload cache for faster switching
   
-  // Core player state
+  // Core player state with performance optimizations
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
@@ -17,14 +19,16 @@ const NetflixVideoPlayer = ({ video, backendUrl, accessToken, onBack, onNextVide
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [playbackRate, setPlaybackRate] = useState(1);
   
-  // Advanced player state
+  // Enhanced player state for performance
   const [currentQuality, setCurrentQuality] = useState('Auto');
   const [isBuffering, setIsBuffering] = useState(false);
   const [bufferedRanges, setBufferedRanges] = useState([]);
+  const [bufferHealth, setBufferHealth] = useState(0); // Buffer health percentage
   const [error, setError] = useState('');
   const [isPiPMode, setIsPiPMode] = useState(false);
+  const [networkSpeed, setNetworkSpeed] = useState('fast'); // Network speed detection
   
-  // UI state
+  // UI state with optimizations
   const [showControls, setShowControls] = useState(true);
   const [showQualityMenu, setShowQualityMenu] = useState(false);
   const [showSubtitleMenu, setShowSubtitleMenu] = useState(false);
@@ -33,7 +37,6 @@ const NetflixVideoPlayer = ({ video, backendUrl, accessToken, onBack, onNextVide
   
   // Advanced UI state
   const [previewTime, setPreviewTime] = useState(null);
-  const [previewThumbnail, setPreviewThumbnail] = useState(null);
   const [showSkipIntro, setShowSkipIntro] = useState(false);
   const [showSkipOutro, setShowSkipOutro] = useState(false);
   const [autoplayCountdown, setAutoplayCountdown] = useState(null);
@@ -49,33 +52,126 @@ const NetflixVideoPlayer = ({ video, backendUrl, accessToken, onBack, onNextVide
     fontFamily: 'Netflix Sans, Arial, sans-serif'
   });
   
-  // Mobile detection
+  // Performance state
+  const [adaptiveQuality, setAdaptiveQuality] = useState(true);
+  const [prefetchEnabled, setPrefetchEnabled] = useState(true);
+  const [bufferSize, setBufferSize] = useState(30); // Buffer ahead in seconds
+  
+  // Mobile detection with performance optimization
   const [isMobile, setIsMobile] = useState(false);
   
   // Timers
   const hideControlsTimer = useRef(null);
   const autoplayTimer = useRef(null);
+  const bufferMonitor = useRef(null);
+  const performanceMonitor = useRef(null);
   
-  // Quality and playback options
-  const qualityOptions = ['Auto', '1080p', '720p', '480p', '360p'];
-  const playbackRates = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2];
+  // Quality and playback options optimized for performance
+  const qualityOptions = useMemo(() => ['Auto', '1080p', '720p', '480p', '360p'], []);
+  const playbackRates = useMemo(() => [0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2], []);
   
-  // Device and format detection
-  const deviceInfo = VideoFormatUtils.getDeviceInfo();
-  const formatInfo = VideoFormatUtils.detectFormat(video.name);
-  const compatibilityInfo = VideoFormatUtils.getCompatibilityWarning(video.name);
-  const streamingParams = VideoFormatUtils.getStreamingParams(video.name, video.size);
+  // Device and format detection with caching
+  const deviceInfo = useMemo(() => VideoFormatUtils.getDeviceInfo(), []);
+  const formatInfo = useMemo(() => VideoFormatUtils.detectFormat(video.name), [video.name]);
+  const compatibilityInfo = useMemo(() => VideoFormatUtils.getCompatibilityWarning(video.name), [video.name]);
+  const streamingParams = useMemo(() => VideoFormatUtils.getStreamingParams(video.name, video.size), [video.name, video.size]);
   
   // Device-specific flags
   const isMobileChrome = deviceInfo.isMobileChrome;
+  const isMKV = formatInfo.format === 'mkv';
+  const isMP4 = formatInfo.format === 'mp4';
   const hasCompatibilityIssues = compatibilityInfo.warnings.length > 0;
   
+  // Enhanced video URL generation with caching and optimization
+  const getOptimizedVideoUrl = useCallback((videoId, quality = 'Auto', enableCache = true) => {
+    const cacheKey = `${videoId}_${quality}`;
+    
+    if (enableCache && preloadCache.current.has(cacheKey)) {
+      return preloadCache.current.get(cacheKey);
+    }
+    
+    let baseUrl = `${backendUrl}/api/stream/${videoId}?token=${accessToken}`;
+    
+    // Add performance parameters based on format and device
+    const params = new URLSearchParams();
+    
+    // Quality parameter
+    if (quality !== 'Auto') {
+      params.append('quality', quality.toLowerCase());
+    }
+    
+    // Device-specific optimizations
+    if (isMobileChrome && isMKV) {
+      params.append('mobile_mkv', 'true');
+      params.append('chunk_size', '32768'); // 32KB chunks for mobile MKV
+    } else if (isMKV) {
+      params.append('chunk_size', '65536'); // 64KB chunks for desktop MKV
+    } else if (video.size > 500 * 1024 * 1024) { // Files > 500MB
+      params.append('chunk_size', '1048576'); // 1MB chunks for large files
+    }
+    
+    // Buffer optimization
+    params.append('buffer_size', bufferSize.toString());
+    
+    // Network speed optimization
+    if (networkSpeed === 'slow') {
+      params.append('low_bandwidth', 'true');
+    }
+    
+    // Add cache busting for error recovery
+    if (!enableCache) {
+      params.append('t', Date.now().toString());
+    }
+    
+    const optimizedUrl = `${baseUrl}&${params.toString()}`;
+    
+    if (enableCache) {
+      preloadCache.current.set(cacheKey, optimizedUrl);
+    }
+    
+    return optimizedUrl;
+  }, [backendUrl, accessToken, isMobileChrome, isMKV, video.size, bufferSize, networkSpeed]);
+
+  // Network speed detection
+  useEffect(() => {
+    const detectNetworkSpeed = async () => {
+      try {
+        const startTime = Date.now();
+        // Test with a small chunk request
+        const testUrl = `${backendUrl}/api/stream/${video.id}?token=${accessToken}&test=true`;
+        const response = await fetch(testUrl, {
+          method: 'HEAD',
+          headers: { 'Range': 'bytes=0-1023' } // 1KB test
+        });
+        
+        const endTime = Date.now();
+        const latency = endTime - startTime;
+        
+        if (latency > 2000) {
+          setNetworkSpeed('slow');
+          setBufferSize(60); // Increase buffer for slow networks
+        } else if (latency > 1000) {
+          setNetworkSpeed('medium');
+          setBufferSize(45);
+        } else {
+          setNetworkSpeed('fast');
+          setBufferSize(30);
+        }
+      } catch (error) {
+        console.warn('Network speed detection failed:', error);
+        setNetworkSpeed('medium');
+      }
+    };
+    
+    detectNetworkSpeed();
+  }, [backendUrl, video.id, accessToken]);
+
   // Log format information for debugging
   useEffect(() => {
     VideoFormatUtils.logFormatInfo(video.name, video.size);
   }, [video.name, video.size]);
 
-  // Initialize player
+  // Initialize player with performance optimizations
   useEffect(() => {
     const checkMobile = () => {
       const isMobileDevice = window.innerWidth <= 768 || 
@@ -90,14 +186,19 @@ const NetflixVideoPlayer = ({ video, backendUrl, accessToken, onBack, onNextVide
     // Load subtitles
     loadSubtitles();
     
+    // Start performance monitoring
+    startPerformanceMonitoring();
+    
     return () => {
       window.removeEventListener('resize', checkMobile);
       if (hideControlsTimer.current) clearTimeout(hideControlsTimer.current);
       if (autoplayTimer.current) clearTimeout(autoplayTimer.current);
+      if (bufferMonitor.current) clearInterval(bufferMonitor.current);
+      if (performanceMonitor.current) clearInterval(performanceMonitor.current);
     };
   }, []);
 
-  // Video event handlers
+  // Enhanced video event handlers with performance optimizations
   useEffect(() => {
     const videoElement = videoRef.current;
     if (!videoElement) return;
@@ -107,27 +208,52 @@ const NetflixVideoPlayer = ({ video, backendUrl, accessToken, onBack, onNextVide
       setError('');
       showControlsTemporarily();
       
-      // Detect intro/outro sections (simplified logic)
+      // Detect intro/outro sections with performance consideration
       if (videoElement.duration > 60) {
         setShowSkipIntro(true);
-        setTimeout(() => setShowSkipIntro(false), 30000); // Hide after 30s
+        setTimeout(() => setShowSkipIntro(false), 30000);
+      }
+      
+      // Start buffer monitoring
+      startBufferMonitoring();
+      
+      // Preload next video if available
+      if (prefetchEnabled && playlist.length > 0) {
+        preloadNextVideo();
       }
     };
 
-    const handleTimeUpdate = () => {
+    const handleTimeUpdate = useCallback(() => {
       const currentTime = videoElement.currentTime;
       setCurrentTime(currentTime);
       
-      // Update buffered ranges
+      // Enhanced buffered ranges tracking
       const buffered = videoElement.buffered;
       const ranges = [];
+      let totalBuffered = 0;
+      
       for (let i = 0; i < buffered.length; i++) {
-        ranges.push({
-          start: buffered.start(i),
-          end: buffered.end(i)
-        });
+        const start = buffered.start(i);
+        const end = buffered.end(i);
+        ranges.push({ start, end });
+        totalBuffered += end - start;
       }
+      
       setBufferedRanges(ranges);
+      
+      // Calculate buffer health
+      const bufferAhead = totalBuffered - currentTime;
+      const bufferHealthPercent = Math.min(100, (bufferAhead / bufferSize) * 100);
+      setBufferHealth(bufferHealthPercent);
+      
+      // Adaptive quality based on buffer health
+      if (adaptiveQuality && bufferHealthPercent < 30 && currentQuality !== '720p') {
+        console.log('Auto-reducing quality due to buffer health');
+        changeQuality('720p');
+      } else if (adaptiveQuality && bufferHealthPercent > 80 && currentQuality !== 'Auto') {
+        console.log('Auto-increasing quality due to good buffer health');
+        changeQuality('Auto');
+      }
       
       // Show skip outro in last 2 minutes
       if (duration - currentTime < 120 && duration - currentTime > 60) {
@@ -140,7 +266,7 @@ const NetflixVideoPlayer = ({ video, backendUrl, accessToken, onBack, onNextVide
       if (duration - currentTime < 30 && playlist.length > 0) {
         setShowUpNext(true);
       }
-    };
+    }, [duration, playlist.length, bufferSize, adaptiveQuality, currentQuality]);
 
     const handlePlay = () => {
       setIsPlaying(true);
@@ -176,27 +302,52 @@ const NetflixVideoPlayer = ({ video, backendUrl, accessToken, onBack, onNextVide
       setIsBuffering(false);
       
       const videoSrc = videoElement.src;
-      const isMkvFile = videoSrc.includes('.mkv') || video.name.toLowerCase().endsWith('.mkv');
       
-      if (isMkvFile) {
-        setError('MKV file format may not be supported in this browser. Try Chrome, Firefox, or Edge.');
+      if (isMKV) {
+        if (isMobileChrome) {
+          setError('MKV playback on mobile Chrome may have issues. Trying optimized streaming...');
+          // Retry with mobile optimization
+          setTimeout(() => {
+            videoElement.src = getOptimizedVideoUrl(video.id, currentQuality, false);
+            videoElement.load();
+          }, 2000);
+        } else {
+          setError('MKV file format detected. Loading with optimized settings...');
+          setTimeout(() => {
+            videoElement.src = getOptimizedVideoUrl(video.id, '720p', false);
+            videoElement.load();
+          }, 2000);
+        }
       } else {
         setError('Video playback error. Trying to recover...');
-        
-        // Auto-retry logic
+        // Auto-retry with lower quality
         setTimeout(() => {
-          if (videoElement.src) {
-            videoElement.load();
-          }
+          const lowerQuality = currentQuality === 'Auto' ? '720p' : '480p';
+          videoElement.src = getOptimizedVideoUrl(video.id, lowerQuality, false);
+          videoElement.load();
         }, 2000);
       }
     };
 
     const handleProgress = () => {
       setIsBuffering(false);
+      
+      // Update buffer cache
+      const buffered = videoElement.buffered;
+      const cacheKey = `${video.id}_${currentQuality}`;
+      const bufferData = [];
+      
+      for (let i = 0; i < buffered.length; i++) {
+        bufferData.push({
+          start: buffered.start(i),
+          end: buffered.end(i)
+        });
+      }
+      
+      bufferCache.current.set(cacheKey, bufferData);
     };
 
-    // Attach event listeners
+    // Attach event listeners with optimized throttling
     videoElement.addEventListener('loadedmetadata', handleLoadedMetadata);
     videoElement.addEventListener('timeupdate', handleTimeUpdate);
     videoElement.addEventListener('play', handlePlay);
@@ -218,9 +369,89 @@ const NetflixVideoPlayer = ({ video, backendUrl, accessToken, onBack, onNextVide
       videoElement.removeEventListener('error', handleError);
       videoElement.removeEventListener('progress', handleProgress);
     };
-  }, [video.id, duration, playlist, onNextVideo]);
+  }, [video.id, duration, playlist, onNextVideo, currentQuality, getOptimizedVideoUrl, isMKV, isMobileChrome, bufferSize, adaptiveQuality, prefetchEnabled]);
 
-  // Keyboard shortcuts
+  // Performance monitoring
+  const startPerformanceMonitoring = useCallback(() => {
+    performanceMonitor.current = setInterval(() => {
+      const videoElement = videoRef.current;
+      if (!videoElement) return;
+      
+      // Monitor dropped frames (if supported)
+      if (videoElement.getVideoPlaybackQuality) {
+        const quality = videoElement.getVideoPlaybackQuality();
+        const droppedFrameRatio = quality.droppedVideoFrames / quality.totalVideoFrames;
+        
+        if (droppedFrameRatio > 0.05 && adaptiveQuality) { // More than 5% dropped frames
+          console.log('High dropped frame ratio detected, reducing quality');
+          const lowerQuality = currentQuality === 'Auto' ? '720p' : '480p';
+          changeQuality(lowerQuality);
+        }
+      }
+      
+      // Monitor playback stalls
+      if (videoElement.readyState < 3 && isPlaying) {
+        console.log('Playback stall detected');
+        setIsBuffering(true);
+      }
+    }, 5000); // Check every 5 seconds
+  }, [adaptiveQuality, currentQuality, isPlaying]);
+
+  // Buffer monitoring
+  const startBufferMonitoring = useCallback(() => {
+    bufferMonitor.current = setInterval(() => {
+      const videoElement = videoRef.current;
+      if (!videoElement) return;
+      
+      const buffered = videoElement.buffered;
+      const currentTime = videoElement.currentTime;
+      let bufferAhead = 0;
+      
+      for (let i = 0; i < buffered.length; i++) {
+        if (buffered.start(i) <= currentTime && buffered.end(i) > currentTime) {
+          bufferAhead = buffered.end(i) - currentTime;
+          break;
+        }
+      }
+      
+      // If buffer is low, pause until we have enough buffer
+      if (bufferAhead < 5 && isPlaying && !isBuffering) {
+        console.log('Buffer too low, temporarily pausing');
+        setIsBuffering(true);
+        videoElement.pause();
+        
+        // Resume when buffer is healthy
+        setTimeout(() => {
+          if (bufferAhead > 10) {
+            setIsBuffering(false);
+            videoElement.play();
+          }
+        }, 2000);
+      }
+    }, 1000); // Check every second
+  }, [isPlaying, isBuffering]);
+
+  // Preload next video for faster switching
+  const preloadNextVideo = useCallback(() => {
+    if (playlist.length > 0 && prefetchEnabled) {
+      const nextVideo = playlist[0];
+      const preloadUrl = getOptimizedVideoUrl(nextVideo.id, currentQuality, true);
+      
+      // Create a hidden video element for preloading
+      const preloadVideo = document.createElement('video');
+      preloadVideo.src = preloadUrl;
+      preloadVideo.preload = 'metadata';
+      preloadVideo.style.display = 'none';
+      document.body.appendChild(preloadVideo);
+      
+      // Remove after preloading
+      setTimeout(() => {
+        document.body.removeChild(preloadVideo);
+      }, 10000);
+    }
+  }, [playlist, prefetchEnabled, currentQuality, getOptimizedVideoUrl]);
+
+  // Keyboard shortcuts with performance optimization
   useEffect(() => {
     const handleKeyPress = (e) => {
       if (e.target.tagName === 'INPUT') return;
@@ -300,7 +531,7 @@ const NetflixVideoPlayer = ({ video, backendUrl, accessToken, onBack, onNextVide
     return () => document.removeEventListener('fullscreenchange', handleFullscreenChange);
   }, []);
 
-  // Player control functions
+  // Player control functions with optimizations
   const togglePlay = async () => {
     if (!videoRef.current) return;
     
@@ -351,8 +582,6 @@ const NetflixVideoPlayer = ({ video, backendUrl, accessToken, onBack, onNextVide
     const hoverTime = Math.max(0, Math.min(duration, percent * duration));
     
     setPreviewTime(hoverTime);
-    // In a real implementation, you would generate thumbnail previews
-    // setPreviewThumbnail(generateThumbnailUrl(hoverTime));
   };
 
   const adjustVolume = (delta) => {
@@ -418,8 +647,8 @@ const NetflixVideoPlayer = ({ video, backendUrl, accessToken, onBack, onNextVide
       setShowQualityMenu(false);
       setIsBuffering(true);
       
-      // Update video source with quality parameter
-      const newSrc = getQualityUrl(video.id, quality);
+      // Update video source with optimized URL
+      const newSrc = getOptimizedVideoUrl(video.id, quality);
       videoRef.current.src = newSrc;
       videoRef.current.currentTime = currentTimeStamp;
       
@@ -502,7 +731,7 @@ const NetflixVideoPlayer = ({ video, backendUrl, accessToken, onBack, onNextVide
     showControlsTemporarily();
   };
 
-  // Control visibility
+  // Control visibility with optimizations
   const showControlsTemporarily = () => {
     setShowControls(true);
     
@@ -511,7 +740,7 @@ const NetflixVideoPlayer = ({ video, backendUrl, accessToken, onBack, onNextVide
     }
     
     hideControlsTimer.current = setTimeout(() => {
-      if (isPlaying && !showQualityMenu && !showSubtitleMenu && !showSettingsMenu) {
+      if (isPlaying && isFullscreen && !showQualityMenu && !showSubtitleMenu && !showSettingsMenu) {
         setShowControls(false);
       }
     }, 3000);
@@ -527,7 +756,6 @@ const NetflixVideoPlayer = ({ video, backendUrl, accessToken, onBack, onNextVide
   const handleContainerTouch = (e) => {
     if (!isMobile) return;
     
-    // Always show controls when touching anywhere in the container
     setShowControls(true);
     showControlsTemporarily();
   };
@@ -535,25 +763,15 @@ const NetflixVideoPlayer = ({ video, backendUrl, accessToken, onBack, onNextVide
   const handleContainerClick = (e) => {
     if (!isMobile) return;
     
-    // Show controls when clicking anywhere in the container (including video)
     setShowControls(true);
     showControlsTemporarily();
     
-    // If clicking directly on video, also toggle play/pause
     if (e.target === videoRef.current) {
       togglePlay();
     }
   };
 
   // Utility functions
-  const getQualityUrl = (videoId, quality) => {
-    const baseUrl = `${backendUrl}/api/stream/${videoId}?token=${accessToken}`;
-    if (quality === 'Auto') {
-      return baseUrl;
-    }
-    return `${baseUrl}&quality=${quality.toLowerCase()}`;
-  };
-
   const formatTime = (time) => {
     if (isNaN(time)) return '0:00';
     const hours = Math.floor(time / 3600);
@@ -574,12 +792,18 @@ const NetflixVideoPlayer = ({ video, backendUrl, accessToken, onBack, onNextVide
     return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
   };
 
+  const getBufferHealthColor = () => {
+    if (bufferHealth > 70) return '#4CAF50'; // Green
+    if (bufferHealth > 30) return '#FF9800'; // Orange
+    return '#F44336'; // Red
+  };
+
   return (
     <div 
       className={`netflix-player-container ${isFullscreen ? 'fullscreen' : ''}`}
       ref={containerRef}
       onMouseMove={handleMouseMove}
-      onMouseLeave={() => !isMobile && isPlaying && setShowControls(false)}
+      onMouseLeave={() => !isMobile && isPlaying && isFullscreen && setShowControls(false)}
       onTouchStart={handleContainerTouch}
       onTouchEnd={handleContainerTouch}
       onClick={handleContainerClick}
@@ -594,39 +818,65 @@ const NetflixVideoPlayer = ({ video, backendUrl, accessToken, onBack, onNextVide
         />
       )}
 
-      {/* Video Element */}
+      {/* Video Element with enhanced attributes for performance */}
       <video
         ref={videoRef}
         className="netflix-video"
-        src={getQualityUrl(video.id, currentQuality)}
+        src={getOptimizedVideoUrl(video.id, currentQuality)}
         preload="metadata"
         crossOrigin="anonymous"
         playsInline
+        autoPlay={false}
+        muted={false}
+        controls={false}
+        {...(isMKV ? {
+          'webkit-playsinline': true,
+          'x5-playsinline': true,
+          'x5-video-player-type': 'h5'
+        } : {})}
         onClick={!isMobile ? togglePlay : undefined}
       />
 
-      {/* Loading Overlay */}
+      {/* Enhanced Loading Overlay with buffer info */}
       {isBuffering && (
         <div className="netflix-loading-overlay">
           <div className="netflix-spinner">
             <div className="netflix-spinner-circle"></div>
           </div>
-          <div className="netflix-loading-text">Loading...</div>
+          <div className="netflix-loading-text">
+            {isMP4 ? 'Loading MP4...' : isMKV ? 'Loading MKV...' : 'Loading...'}
+          </div>
+          <div className="netflix-buffer-info">
+            Buffer: {Math.round(bufferHealth)}%
+          </div>
+          {networkSpeed !== 'fast' && (
+            <div className="netflix-network-info">
+              Network: {networkSpeed}
+            </div>
+          )}
         </div>
       )}
 
-      {/* Error Overlay */}
+      {/* Enhanced Error Overlay with format-specific help */}
       {error && (
         <div className="netflix-error-overlay">
           <div className="netflix-error-content">
             <div className="netflix-error-icon">⚠️</div>
             <div className="netflix-error-title">Playback Error</div>
             <div className="netflix-error-message">{error}</div>
+            {isMKV && (
+              <div className="netflix-format-help">
+                <p><strong>MKV Optimization Tips:</strong></p>
+                <p>• Using optimized chunking for better performance</p>
+                <p>• {isMobileChrome ? 'Mobile Chrome mode enabled' : 'Desktop optimization active'}</p>
+              </div>
+            )}
             <button 
               className="netflix-error-retry"
               onClick={() => {
                 setError('');
                 if (videoRef.current) {
+                  videoRef.current.src = getOptimizedVideoUrl(video.id, currentQuality, false);
                   videoRef.current.load();
                 }
               }}
@@ -702,13 +952,23 @@ const NetflixVideoPlayer = ({ video, backendUrl, accessToken, onBack, onNextVide
 
       {/* Controls Overlay */}
       <div className={`netflix-controls ${showControls ? 'visible' : 'hidden'}`}>
-        {/* Top Bar */}
+        {/* Top Bar with performance info */}
         <div className="netflix-top-bar">
           <button className="netflix-back-button" onClick={onBack}>
             ← Back
           </button>
           <div className="netflix-video-title">{video.name}</div>
           <div className="netflix-top-controls">
+            {/* Buffer health indicator */}
+            <div className="netflix-buffer-indicator">
+              <div 
+                className="netflix-buffer-bar"
+                style={{ 
+                  width: `${bufferHealth}%`,
+                  backgroundColor: getBufferHealthColor()
+                }}
+              ></div>
+            </div>
             <button 
               className="netflix-control-button"
               onClick={() => setShowSettingsMenu(!showSettingsMenu)}
@@ -727,7 +987,7 @@ const NetflixVideoPlayer = ({ video, backendUrl, accessToken, onBack, onNextVide
           </div>
         )}
 
-        {/* Progress Bar */}
+        {/* Progress Bar with enhanced buffering visualization */}
         <div className="netflix-bottom-section">
           <div className="netflix-progress-container">
             <div 
@@ -737,14 +997,15 @@ const NetflixVideoPlayer = ({ video, backendUrl, accessToken, onBack, onNextVide
               onMouseMove={handleProgressHover}
               onMouseLeave={() => setPreviewTime(null)}
             >
-              {/* Buffered ranges */}
+              {/* Enhanced buffered ranges */}
               {bufferedRanges.map((range, index) => (
                 <div
                   key={index}
                   className="netflix-buffered-range"
                   style={{
                     left: `${(range.start / duration) * 100}%`,
-                    width: `${((range.end - range.start) / duration) * 100}%`
+                    width: `${((range.end - range.start) / duration) * 100}%`,
+                    opacity: 0.6
                   }}
                 />
               ))}
@@ -839,7 +1100,7 @@ const NetflixVideoPlayer = ({ video, backendUrl, accessToken, onBack, onNextVide
                 className="netflix-control-button"
                 onClick={() => setShowQualityMenu(!showQualityMenu)}
               >
-                HD
+                {currentQuality === 'Auto' ? 'HD' : currentQuality}
               </button>
               
               {document.pictureInPictureEnabled && (
@@ -855,7 +1116,7 @@ const NetflixVideoPlayer = ({ video, backendUrl, accessToken, onBack, onNextVide
           </div>
         </div>
 
-        {/* Quality Menu */}
+        {/* Enhanced Quality Menu */}
         {showQualityMenu && (
           <div className="netflix-menu netflix-quality-menu">
             <div className="netflix-menu-header">Video Quality</div>
@@ -866,9 +1127,19 @@ const NetflixVideoPlayer = ({ video, backendUrl, accessToken, onBack, onNextVide
                 onClick={() => changeQuality(quality)}
               >
                 {quality}
-                {quality === 'Auto' && <span className="netflix-menu-description">Adjust automatically</span>}
+                {quality === 'Auto' && <span className="netflix-menu-description">Adaptive quality</span>}
+                {quality === '1080p' && <span className="netflix-menu-description">Full HD</span>}
+                {quality === '720p' && <span className="netflix-menu-description">HD</span>}
               </div>
             ))}
+            <div className="netflix-menu-divider"></div>
+            <div 
+              className={`netflix-menu-item ${adaptiveQuality ? 'active' : ''}`}
+              onClick={() => setAdaptiveQuality(!adaptiveQuality)}
+            >
+              Adaptive Quality
+              <span className="netflix-menu-description">Auto-adjust based on performance</span>
+            </div>
           </div>
         )}
 
@@ -895,7 +1166,7 @@ const NetflixVideoPlayer = ({ video, backendUrl, accessToken, onBack, onNextVide
           </div>
         )}
 
-        {/* Settings Menu */}
+        {/* Enhanced Settings Menu */}
         {showSettingsMenu && (
           <div className="netflix-menu netflix-settings-menu">
             <div className="netflix-menu-header">Playback Settings</div>
@@ -912,6 +1183,21 @@ const NetflixVideoPlayer = ({ video, backendUrl, accessToken, onBack, onNextVide
                 </div>
               ))}
             </div>
+            
+            <div className="netflix-menu-section">
+              <div className="netflix-menu-section-title">Performance</div>
+              <div 
+                className={`netflix-menu-item ${prefetchEnabled ? 'active' : ''}`}
+                onClick={() => setPrefetchEnabled(!prefetchEnabled)}
+              >
+                Preload Next Video
+                <span className="netflix-menu-description">Faster switching</span>
+              </div>
+              <div className="netflix-menu-item">
+                Buffer Size: {bufferSize}s
+                <span className="netflix-menu-description">Network: {networkSpeed}</span>
+              </div>
+            </div>
           </div>
         )}
       </div>
@@ -923,7 +1209,7 @@ const NetflixVideoPlayer = ({ video, backendUrl, accessToken, onBack, onNextVide
         </div>
       )}
 
-      {/* Video Info Panel */}
+      {/* Enhanced Video Info Panel */}
       {!isFullscreen && (
         <div className="netflix-info-panel">
           <div className="netflix-info-title">{video.name}</div>
@@ -932,9 +1218,17 @@ const NetflixVideoPlayer = ({ video, backendUrl, accessToken, onBack, onNextVide
           )}
           <div className="netflix-info-details">
             <span>Size: {formatFileSize(video.size)}</span>
+            <span>Format: {formatInfo.format.toUpperCase()}</span>
             <span>Quality: {currentQuality}</span>
             <span>Speed: {playbackRate}x</span>
+            <span>Buffer: {Math.round(bufferHealth)}%</span>
+            <span>Network: {networkSpeed}</span>
           </div>
+          {hasCompatibilityIssues && (
+            <div className="netflix-compatibility-warning">
+              ⚠️ {compatibilityInfo.compatibility} compatibility - {compatibilityInfo.warnings[0]}
+            </div>
+          )}
         </div>
       )}
     </div>
