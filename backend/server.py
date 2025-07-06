@@ -1436,63 +1436,123 @@ async def stream_media(
                     
                 except (ValueError, IndexError) as e:
                     logger.error(f"Invalid range header: {range_header}, error: {e}")
-                    # Fall back to full file streaming
+                    # Fall back to full file streaming with error recovery
             
-            # Full file streaming with optimizations
+            # Ultra-optimized full file streaming with advanced caching and performance
             async def generate_full():
                 try:
                     timeout_config = httpx.Timeout(
-                        connect=15.0,
-                        read=180.0 if is_mkv else 120.0,
-                        write=60.0,
-                        pool=60.0
+                        connect=20.0,
+                        read=base_timeout * 3,  # Triple timeout for full file streaming
+                        write=90.0,
+                        pool=90.0
                     )
                     
                     async with httpx.AsyncClient(timeout=timeout_config) as stream_client:
-                        async with stream_client.stream("GET", download_url) as media_response:
+                        # Add conditional headers for better caching
+                        request_headers = {}
+                        if_modified_since = request.headers.get("If-Modified-Since")
+                        if if_modified_since:
+                            request_headers["If-Modified-Since"] = if_modified_since
+                        
+                        async with stream_client.stream("GET", download_url, headers=request_headers) as media_response:
+                            if media_response.status_code == 304:
+                                # Not modified, client can use cache
+                                yield b""  # Empty response for 304
+                                return
+                            
                             if media_response.status_code != 200:
                                 logger.error(f"Full streaming failed: {media_response.status_code}")
                                 return
                             
-                            # Stream with optimized chunk size
+                            # Ultra-optimized streaming with performance monitoring
                             bytes_streamed = 0
+                            last_log_time = 0
+                            start_time = asyncio.get_event_loop().time()
+                            total_chunks = 0
+                            
                             async for chunk in media_response.aiter_bytes(chunk_size=chunk_size):
                                 yield chunk
                                 bytes_streamed += len(chunk)
+                                total_chunks += 1
                                 
-                                # Progress logging for large files
-                                if file_size > 100 * 1024 * 1024 and bytes_streamed % (chunk_size * 200) == 0:
-                                    progress = (bytes_streamed / file_size) * 100
-                                    logger.debug(f"Full streaming progress: {progress:.1f}%")
+                                # Advanced performance logging and monitoring
+                                current_time = asyncio.get_event_loop().time()
+                                if current_time - last_log_time > 10.0:  # Log every 10 seconds for full streaming
+                                    progress = (bytes_streamed / file_size) * 100 if file_size > 0 else 0
+                                    elapsed_time = current_time - start_time
+                                    speed = bytes_streamed / (elapsed_time + 0.1)  # Avoid division by zero
+                                    eta = ((file_size - bytes_streamed) / speed) if speed > 0 else 0
+                                    
+                                    logger.debug(f"Full streaming: {progress:.1f}% | Speed: {speed/1024:.1f} KB/s | ETA: {eta:.0f}s | Chunks: {total_chunks}")
+                                    last_log_time = current_time
+                                    
+                                # Adaptive throttling for large files on slow connections
+                                if low_bandwidth == "true" and total_chunks % 50 == 0:
+                                    await asyncio.sleep(0.01)  # Small delay for slow connections
                                     
                 except Exception as e:
-                    logger.error(f"Error in full streaming: {str(e)}")
+                    logger.error(f"Error in ultra-optimized full streaming: {str(e)}")
                     return
             
-            # Headers for full file response
+            # Enhanced headers for full file response with advanced caching
             full_headers = {
                 "Accept-Ranges": "bytes",
                 "Content-Length": str(file_size),
                 "Access-Control-Allow-Origin": "*",
-                "Access-Control-Allow-Headers": "Range, Content-Type, Authorization",
-                "Access-Control-Expose-Headers": "Content-Range, Content-Length, Accept-Ranges",
-                "Cache-Control": "public, max-age=3600",
+                "Access-Control-Allow-Headers": "Range, Content-Type, Authorization, If-Modified-Since",
+                "Access-Control-Expose-Headers": "Content-Range, Content-Length, Accept-Ranges, Last-Modified, ETag",
+                "Cache-Control": "public, max-age=3600, stale-while-revalidate=86400",
+                "Last-Modified": file_info.get("lastModifiedDateTime", ""),
+                "ETag": f'"{file_info.get("eTag", "")}"' if file_info.get("eTag") else None,
             }
             
-            # MKV-specific headers for mobile Chrome
+            # Remove None values
+            full_headers = {k: v for k, v in full_headers.items() if v is not None}
+            
+            # Format-specific optimizations for full streaming
             if is_mkv:
                 full_headers.update({
                     "X-Content-Type-Options": "nosniff",
                     "Content-Disposition": "inline",
+                    "X-Content-Format": "MKV",
                 })
                 
-                if is_mobile_chrome:
-                    # Mobile Chrome specific headers for MKV
+                if mobile_mkv == "true" or is_mobile_chrome:
+                    # Mobile Chrome specific headers for MKV full streaming
                     full_headers.update({
                         "Connection": "keep-alive",
-                        "Transfer-Encoding": "chunked",
-                        "Vary": "Accept-Encoding",
+                        "Keep-Alive": "timeout=45, max=50",
+                        "Vary": "Accept-Encoding, User-Agent",
+                        "X-Mobile-Optimized": "true",
                     })
+            elif is_mp4:
+                # MP4 full streaming optimizations
+                full_headers.update({
+                    "X-Content-Duration": str(buffer_size),
+                    "X-Content-Type-Options": "nosniff",
+                    "X-Content-Format": "MP4",
+                })
+                
+                # Extra headers for 1080p content
+                if file_size > 1 * 1024 * 1024 * 1024:  # > 1GB
+                    full_headers.update({
+                        "X-Content-Quality": "1080p",
+                        "X-Streaming-Optimized": "true",
+                    })
+            
+            # Bandwidth-specific optimizations
+            if low_bandwidth == "true":
+                full_headers.update({
+                    "Cache-Control": "public, max-age=7200, stale-while-revalidate=172800",
+                    "Connection": "keep-alive",
+                    "Keep-Alive": "timeout=90, max=25",
+                    "X-Bandwidth-Optimized": "true",
+                })
+            
+            # Quality-specific headers
+            if quality:
+                full_headers["X-Requested-Quality"] = quality
             
             return StreamingResponse(
                 generate_full(),
