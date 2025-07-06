@@ -67,6 +67,20 @@ const NetflixVideoPlayer = ({ video, backendUrl, accessToken, onBack, onNextVide
   const streamingParams = VideoFormatUtils.getStreamingParams(video.name, video.size);
   
   // Device-specific flags
+  const isMobileChrome = deviceInfo.isMobileChrome;
+  const hasCompatibilityIssues = compatibilityInfo.warnings.length > 0;
+  
+  // Log format information for debugging
+  useEffect(() => {
+    VideoFormatUtils.logFormatInfo(video.name, video.size);
+  }, [video.name, video.size]);
+  // Device and format detection
+  const deviceInfo = VideoFormatUtils.getDeviceInfo();
+  const formatInfo = VideoFormatUtils.detectFormat(video.name);
+  const compatibilityInfo = VideoFormatUtils.getCompatibilityWarning(video.name);
+  const streamingParams = VideoFormatUtils.getStreamingParams(video.name, video.size);
+  
+  // Device-specific flags
   const isMobile = deviceInfo.isMobile;
   const isMobileChrome = deviceInfo.isMobileChrome;
   const hasCompatibilityIssues = compatibilityInfo.warnings.length > 0;
