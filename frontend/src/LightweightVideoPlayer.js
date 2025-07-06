@@ -383,10 +383,12 @@ const LightweightVideoPlayer = ({ video, backendUrl, accessToken, onBack, onNext
             >
               Try Again
             </button>
-            {isMKV && (
+            {hasCompatibilityIssues && (
               <div className="format-help">
-                <p>MKV files may have limited browser support.</p>
-                <p>For best compatibility, consider converting to MP4.</p>
+                <p><strong>Format:</strong> {formatInfo.format.toUpperCase()} - {compatibilityInfo.compatibility} compatibility</p>
+                {compatibilityInfo.recommendations.map((rec, index) => (
+                  <p key={index}>• {rec}</p>
+                ))}
               </div>
             )}
           </div>
