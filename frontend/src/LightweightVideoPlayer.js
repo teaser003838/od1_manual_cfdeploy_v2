@@ -349,9 +349,9 @@ const LightweightVideoPlayer = ({ video, backendUrl, accessToken, onBack, onNext
         <div className="overlay loading-overlay">
           <div className="spinner"></div>
           <div className="loading-text">Loading video...</div>
-          {isMKV && isMobileChrome && (
+          {hasCompatibilityIssues && (
             <div className="format-warning">
-              MKV format detected. Loading may take longer on mobile Chrome.
+              {compatibilityInfo.warnings[0]}
             </div>
           )}
         </div>
