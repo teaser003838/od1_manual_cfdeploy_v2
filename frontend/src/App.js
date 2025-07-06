@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import NetflixVideoPlayer from './NetflixVideoPlayer';
+import LightweightVideoPlayer from './LightweightVideoPlayer';
 import AudioPlayer from './AudioPlayer';
 import FileExplorer from './FileExplorer';
 import PhotoSlideshow from './PhotoSlideshow';
