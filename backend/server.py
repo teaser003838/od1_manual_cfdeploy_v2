@@ -1143,9 +1143,9 @@ async def search_files(q: str, authorization: str = Header(...)):
 
 @app.get("/api/stream/{item_id}")
 async def stream_media(item_id: str, request: Request, authorization: str = Header(None), token: str = None, quality: str = None):
-    """Stream video or audio files with proper format compatibility and range request support"""
+    """Optimized streaming endpoint with enhanced MKV support and performance"""
     try:
-        # Try to get access token from header first, then from query parameter
+        # Get access token
         access_token = None
         if authorization:
             access_token = authorization.replace("Bearer ", "")
@@ -1155,7 +1155,7 @@ async def stream_media(item_id: str, request: Request, authorization: str = Head
             raise HTTPException(status_code=401, detail="Authorization required")
         
         async with httpx.AsyncClient() as client:
-            # Get download URL
+            # Get file metadata
             response = await client.get(
                 f"https://graph.microsoft.com/v1.0/me/drive/items/{item_id}",
                 headers={"Authorization": f"Bearer {access_token}"}
@@ -1172,35 +1172,46 @@ async def stream_media(item_id: str, request: Request, authorization: str = Head
                 logger.error("No download URL available for file")
                 raise HTTPException(status_code=404, detail="Download URL not available")
             
-            # Get file size and detect format
+            # Enhanced file format detection
             file_size = file_info.get("size", 0)
             file_name = file_info.get("name", "").lower()
-            mime_type = file_info.get("file", {}).get("mimeType", "application/octet-stream")
+            mime_type = file_info.get("file", {}).get("mimeType", "")
             
-            # Enhanced MIME type detection and browser compatibility
-            def get_compatible_mime_type(filename, original_mime):
-                """Get browser-compatible MIME type with proper MKV handling"""
+            # Mobile Chrome user agent detection
+            user_agent = request.headers.get("user-agent", "").lower()
+            is_mobile_chrome = ("chrome" in user_agent or "crios" in user_agent) and ("mobile" in user_agent or "android" in user_agent)
+            is_safari_mobile = "safari" in user_agent and "mobile" in user_agent and "chrome" not in user_agent
+            
+            # Enhanced MIME type detection with mobile compatibility
+            def get_optimized_mime_type(filename, original_mime, is_mobile_chrome=False):
+                """Get browser-compatible MIME type with mobile optimizations"""
                 if filename.endswith('.mp4'):
                     return "video/mp4"
                 elif filename.endswith('.webm'):
                     return "video/webm"
                 elif filename.endswith('.mkv'):
-                    # Use proper MKV MIME type - browsers that support MKV will handle it
-                    return "video/x-matroska"
+                    # Special handling for MKV on mobile Chrome
+                    if is_mobile_chrome:
+                        # Try to fallback to MP4 MIME type for better mobile Chrome compatibility
+                        logger.info(f"Mobile Chrome detected for MKV file: {filename}")
+                        return "video/mp4"  # Fallback MIME type for mobile Chrome
+                    else:
+                        return "video/x-matroska"
                 elif filename.endswith('.avi'):
+                    # AVI is generally not supported well on mobile
+                    if is_mobile_chrome or is_safari_mobile:
+                        return "video/mp4"  # Fallback for mobile
                     return "video/x-msvideo"
                 elif filename.endswith('.mov'):
                     return "video/quicktime"
                 elif filename.endswith('.wmv'):
+                    # WMV is not supported on mobile
+                    if is_mobile_chrome or is_safari_mobile:
+                        return "video/mp4"  # Fallback for mobile
                     return "video/x-ms-wmv"
-                elif filename.endswith('.flv'):
-                    return "video/x-flv"
                 elif filename.endswith('.m4v'):
                     return "video/mp4"
-                elif filename.endswith('.3gp'):
-                    return "video/3gpp"
-                elif filename.endswith('.ogv'):
-                    return "video/ogg"
+                # Audio formats
                 elif filename.endswith('.mp3'):
                     return "audio/mpeg"
                 elif filename.endswith('.wav'):
@@ -1213,144 +1224,187 @@ async def stream_media(item_id: str, request: Request, authorization: str = Head
                     return "audio/ogg"
                 elif filename.endswith('.aac'):
                     return "audio/aac"
-                elif filename.endswith('.wma'):
-                    return "audio/x-ms-wma"
-                elif filename.endswith('.opus'):
-                    return "audio/opus"
-                elif filename.endswith('.aiff'):
-                    return "audio/aiff"
-                elif filename.endswith('.alac'):
-                    return "audio/alac"
                 else:
                     return original_mime or "application/octet-stream"
             
-            # Get compatible MIME type
-            compatible_mime = get_compatible_mime_type(file_name, mime_type)
+            # Get optimized MIME type
+            compatible_mime = get_optimized_mime_type(file_name, mime_type, is_mobile_chrome)
             
-            # For MKV files, add special headers to help browser compatibility
+            # File format specific optimizations
             is_mkv = file_name.endswith('.mkv')
+            is_video = any(file_name.endswith(ext) for ext in ['.mp4', '.mkv', '.webm', '.avi', '.mov', '.m4v', '.wmv'])
+            is_audio = any(file_name.endswith(ext) for ext in ['.mp3', '.wav', '.flac', '.m4a', '.ogg', '.aac'])
             
-            logger.info(f"Streaming file: {file_name} (Original MIME: {mime_type}, Compatible MIME: {compatible_mime}, Size: {file_size}, Quality: {quality or 'Auto'})")
+            # Adaptive chunk sizing for performance
+            base_chunk_size = 65536  # 64KB base
             
-            # For large files (>1GB), use optimized streaming parameters
-            is_large_file = file_size > 1024 * 1024 * 1024  # 1GB
-            chunk_size = 1024 * 1024 * 2 if is_large_file else 1024 * 1024  # 2MB for large files, 1MB for others
+            if is_mkv:
+                # Smaller chunks for MKV files to improve compatibility
+                if is_mobile_chrome:
+                    chunk_size = 32768  # 32KB for mobile Chrome MKV
+                else:
+                    chunk_size = 65536  # 64KB for desktop MKV
+            elif file_size > 500 * 1024 * 1024:  # > 500MB
+                chunk_size = 1024 * 1024  # 1MB for large files
+            elif file_size > 100 * 1024 * 1024:  # > 100MB
+                chunk_size = 512 * 1024   # 512KB for medium files
+            else:
+                chunk_size = base_chunk_size  # 64KB for small files
+            
+            logger.info(f"Streaming file: {file_name} | MIME: {compatible_mime} | Size: {file_size} | Chunk: {chunk_size} | Mobile Chrome: {is_mobile_chrome}")
             
             # Handle range requests for seeking
             range_header = request.headers.get("Range")
             if range_header:
-                # Parse range header
                 try:
+                    # Parse range header
                     range_match = range_header.replace("bytes=", "").split("-")
                     start = int(range_match[0]) if range_match[0] else 0
                     end = int(range_match[1]) if range_match[1] else file_size - 1
                     
-                    # Ensure valid range
-                    if start >= file_size:
-                        start = 0
-                    if end >= file_size:
-                        end = file_size - 1
+                    # Validate range
+                    start = max(0, min(start, file_size - 1))
+                    end = max(start, min(end, file_size - 1))
                     
-                    # For large files, limit range size to prevent timeouts
-                    if is_large_file and (end - start) > chunk_size * 10:  # Limit to 10 chunks max
-                        end = start + (chunk_size * 10) - 1
+                    # For MKV on mobile Chrome, limit range size for better compatibility
+                    if is_mkv and is_mobile_chrome:
+                        max_range = 5 * 1024 * 1024  # 5MB max for MKV on mobile Chrome
+                        if (end - start + 1) > max_range:
+                            end = start + max_range - 1
                     
-                    logger.info(f"Range request: bytes={start}-{end}/{file_size} (Large file: {is_large_file})")
+                    logger.info(f"Range request: bytes={start}-{end}/{file_size}")
                     
-                    # Stream with range
+                    # Optimized range streaming
                     async def generate_range():
                         try:
-                            timeout_val = 180.0 if is_large_file else 60.0  # 3min for large files
-                            async with httpx.AsyncClient(timeout=timeout_val) as stream_client:
+                            timeout_config = httpx.Timeout(
+                                connect=10.0,
+                                read=120.0 if is_mkv else 60.0,
+                                write=30.0,
+                                pool=30.0
+                            )
+                            
+                            async with httpx.AsyncClient(timeout=timeout_config) as stream_client:
                                 range_headers = {"Range": f"bytes={start}-{end}"}
                                 async with stream_client.stream("GET", download_url, headers=range_headers) as media_response:
                                     if media_response.status_code not in [200, 206]:
                                         logger.error(f"Range request failed: {media_response.status_code}")
                                         return
                                     
-                                    # Stream in smaller chunks for better performance
-                                    current_chunk_size = 65536 if is_mkv else (chunk_size if is_large_file else 32768)
-                                    async for chunk in media_response.aiter_bytes(chunk_size=current_chunk_size):
+                                    # Stream with adaptive chunk size
+                                    bytes_streamed = 0
+                                    async for chunk in media_response.aiter_bytes(chunk_size=chunk_size):
                                         yield chunk
+                                        bytes_streamed += len(chunk)
+                                        
+                                        # Progress logging for large requests
+                                        if bytes_streamed % (chunk_size * 100) == 0:
+                                            progress = (bytes_streamed / (end - start + 1)) * 100
+                                            logger.debug(f"Range streaming progress: {progress:.1f}%")
+                                            
                         except Exception as e:
                             logger.error(f"Error in range streaming: {str(e)}")
                             return
                     
-                    # Enhanced headers for better compatibility
-                    response_headers = {
+                    # Enhanced headers for range response
+                    range_headers = {
                         "Accept-Ranges": "bytes",
                         "Content-Range": f"bytes {start}-{end}/{file_size}",
                         "Content-Length": str(end - start + 1),
                         "Access-Control-Allow-Origin": "*",
-                        "Access-Control-Allow-Headers": "Range, Content-Type",
+                        "Access-Control-Allow-Headers": "Range, Content-Type, Authorization",
                         "Access-Control-Expose-Headers": "Content-Range, Content-Length, Accept-Ranges",
-                        "Cache-Control": "public, max-age=3600" if not is_large_file else "no-cache, no-store",
+                        "Cache-Control": "public, max-age=3600",
                     }
                     
-                    # Add special headers for MKV files to improve browser compatibility
+                    # MKV-specific headers for mobile Chrome
                     if is_mkv:
-                        response_headers.update({
+                        range_headers.update({
                             "X-Content-Type-Options": "nosniff",
                             "Content-Disposition": "inline",
-                            # Additional headers for MKV range requests
-                            "X-Frame-Options": "SAMEORIGIN",
-                            "Vary": "Accept-Encoding, Range",
                         })
+                        
+                        if is_mobile_chrome:
+                            # Additional headers to help mobile Chrome with MKV
+                            range_headers.update({
+                                "Connection": "keep-alive",
+                                "Transfer-Encoding": "identity",
+                                "Vary": "Accept-Encoding",
+                            })
                     
                     return StreamingResponse(
                         generate_range(),
-                        status_code=206,  # Partial Content
+                        status_code=206,
                         media_type=compatible_mime,
-                        headers=response_headers
+                        headers=range_headers
                     )
+                    
                 except (ValueError, IndexError) as e:
                     logger.error(f"Invalid range header: {range_header}, error: {e}")
                     # Fall back to full file streaming
             
-            # Stream entire file if no range requested
+            # Full file streaming with optimizations
             async def generate_full():
                 try:
-                    timeout_val = 300.0 if is_large_file else 120.0  # 5min for large files, 2min for others
-                    async with httpx.AsyncClient(timeout=timeout_val) as stream_client:
+                    timeout_config = httpx.Timeout(
+                        connect=15.0,
+                        read=180.0 if is_mkv else 120.0,
+                        write=60.0,
+                        pool=60.0
+                    )
+                    
+                    async with httpx.AsyncClient(timeout=timeout_config) as stream_client:
                         async with stream_client.stream("GET", download_url) as media_response:
                             if media_response.status_code != 200:
-                                logger.error(f"Full file streaming failed: {media_response.status_code}")
+                                logger.error(f"Full streaming failed: {media_response.status_code}")
                                 return
-                                
-                            # Use adaptive chunk size for better performance
-                            current_chunk_size = 32768 if is_mkv else (chunk_size if is_large_file else 65536)
-                            async for chunk in media_response.aiter_bytes(chunk_size=current_chunk_size):
+                            
+                            # Stream with optimized chunk size
+                            bytes_streamed = 0
+                            async for chunk in media_response.aiter_bytes(chunk_size=chunk_size):
                                 yield chunk
+                                bytes_streamed += len(chunk)
+                                
+                                # Progress logging for large files
+                                if file_size > 100 * 1024 * 1024 and bytes_streamed % (chunk_size * 200) == 0:
+                                    progress = (bytes_streamed / file_size) * 100
+                                    logger.debug(f"Full streaming progress: {progress:.1f}%")
+                                    
                 except Exception as e:
-                    logger.error(f"Error in full file streaming: {str(e)}")
+                    logger.error(f"Error in full streaming: {str(e)}")
                     return
             
-            # Enhanced headers for full file streaming
-            response_headers = {
+            # Headers for full file response
+            full_headers = {
                 "Accept-Ranges": "bytes",
                 "Content-Length": str(file_size),
                 "Access-Control-Allow-Origin": "*",
-                "Access-Control-Allow-Headers": "Range, Content-Type",
+                "Access-Control-Allow-Headers": "Range, Content-Type, Authorization",
                 "Access-Control-Expose-Headers": "Content-Range, Content-Length, Accept-Ranges",
-                "Cache-Control": "public, max-age=3600" if not is_large_file else "no-cache, no-store",
+                "Cache-Control": "public, max-age=3600",
             }
             
-            # Add special headers for MKV files to improve browser compatibility
+            # MKV-specific headers for mobile Chrome
             if is_mkv:
-                response_headers.update({
+                full_headers.update({
                     "X-Content-Type-Options": "nosniff",
                     "Content-Disposition": "inline",
-                    # Additional headers for MKV streaming
-                    "X-Frame-Options": "SAMEORIGIN",
-                    "Vary": "Accept-Encoding, Range",
-                    "Transfer-Encoding": "chunked" if file_size > 10*1024*1024 else "identity",
                 })
+                
+                if is_mobile_chrome:
+                    # Mobile Chrome specific headers for MKV
+                    full_headers.update({
+                        "Connection": "keep-alive",
+                        "Transfer-Encoding": "chunked",
+                        "Vary": "Accept-Encoding",
+                    })
             
             return StreamingResponse(
                 generate_full(),
                 media_type=compatible_mime,
-                headers=response_headers
+                headers=full_headers
             )
+            
     except HTTPException:
         raise
     except Exception as e:
