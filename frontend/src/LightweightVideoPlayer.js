@@ -334,7 +334,7 @@ const LightweightVideoPlayer = ({ video, backendUrl, accessToken, onBack, onNext
         ref={videoRef}
         className="video-element"
         src={getVideoUrl()}
-        preload="metadata"
+        preload={streamingParams.preload}
         crossOrigin="anonymous"
         playsInline
         {...(isMKV && isMobileChrome ? {
